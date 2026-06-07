@@ -1,23 +1,27 @@
 // distance_calc.hpp
 // ============================================================================
-//  最短距離計算モジュール (障害物までの距離)  — APF非依存・単体で使える
+//  Obstacle distance calculation module — APF-independent, usable standalone
 // ----------------------------------------------------------------------------
-//  役割: 「環境(占有グリッド or LiDAR点群)」を受け取り、
-//        「障害物までの最短距離」に関する情報を返すだけ。
-//        APF(斥力・引力)は一切含まない。どんなAPF実装からでも利用可能。
+//  Purpose: Takes an environment (occupancy grid or LiDAR point cloud) and
+//           returns information about the shortest distance to obstacles.
+//           Contains no APF logic (no repulsive/attractive forces). Can be
+//           used from any APF implementation.
 //
-//  入力 (2通りに対応):
-//    1. 占有グリッド (costmapやscanから作った 0/1 の2D配列)
-//    2. LiDAR点群    (ロボット中心の (x,y) [m] のリスト)
-//       → 内部でグリッドに変換してから距離変換に流す(処理は一本化)
+//  Inputs (two supported):
+//    1. Occupancy grid (a 0/1 2D array built from a costmap or scan)
+//    2. LiDAR point cloud (a list of (x, y) [m] points centered on the robot)
+//       -> internally converted to a grid, then fed to the distance transform
+//          (processing is unified)
 //
-//  出力 (友達のAPFが何を使ってもいいよう4通り提供):
-//    A. distanceAt(r,c)      … 指定セルの最短距離 [m] (数値ひとつ)
-//    B. gradientAt(r,c)      … 「障害物から逃げる向き」= ∂ρ/∂x の単位ベクトル
-//    C. distanceField()      … グリッド全体の距離マップ [m] (2D配列)
-//    D. distanceAtWorld(x,y) … 任意のワールド座標での距離 [m] (近傍補間)
+//  Outputs (four forms, so any APF can use whatever it needs):
+//    A. distanceAt(r, c)      ... shortest distance [m] at a cell (a scalar)
+//    B. gradientAt(r, c)      ... "direction away from obstacles" = unit vector
+//                                  of dphi/dx
+//    C. distanceField()       ... distance map over the whole grid [m] (2D)
+//    D. distanceAtWorld(x, y) ... distance [m] at any world coordinate
 //
-//  外部ライブラリ依存なし(標準C++17のみ)。距離変換は自前実装。
+//  No external library dependencies (standard C++17 only). The distance
+//  transform is implemented in-house.
 // ============================================================================
 
 #ifndef DISTANCE_CALC_DISTANCE_CALC_HPP
@@ -29,14 +33,14 @@
 
 namespace distance_calc {
 
-// 2次元ベクトル(向きなどに使用)
+// 2D vector (used for directions, etc.)
 struct Vec2 {
   double x = 0.0;
   double y = 0.0;
 };
 
-// 占有グリッド(row-major の1次元配列で保持)
-//   value == 0 : 空き / value != 0 : 障害物
+// Occupancy grid (stored as a row-major 1D array)
+//   value == 0 : free / value != 0 : obstacle
 struct OccupancyGrid {
   std::vector<int> data;   // サイズ = rows * cols
   std::size_t rows = 0;
@@ -45,8 +49,8 @@ struct OccupancyGrid {
   int at(std::size_t r, std::size_t c) const { return data[r * cols + c]; }
 };
 
-// LiDAR等の点群を保持するためのグリッド設定。
-// ロボットを中心に、一辺 (2*half_size_m) の正方グリッドを作る。
+// Grid settings for holding a point cloud (e.g. from LiDAR).
+// Builds a square grid of side (2 * half_size_m) centered on the robot.
 struct GridSpec {
   double resolution = 0.05;   // [m/cell]
   double half_size_m = 2.0;   // ロボット中心から端までの距離 [m]
@@ -57,16 +61,16 @@ class DistanceCalculator {
   // resolution: 1セルの大きさ [m/cell]。距離をメートルで返すために使う。
   explicit DistanceCalculator(double resolution);
 
-  // ---- 入力1: 占有グリッドから距離場を構築 ----
+  // ---- Input 1: build the distance field from an occupancy grid ----
   void setFromOccupancyGrid(const OccupancyGrid& grid);
 
-  // ---- 入力2: LiDAR点群から距離場を構築 ----
-  // points: ロボット中心の (x,y) [m]。spec で範囲・解像度を指定。
-  // ロボットはグリッド中心に置かれる。
+  // ---- Input 2: build the distance field from a LiDAR point cloud ----
+  // points: (x, y) [m] centered on the robot. spec sets range and resolution.
+  // The robot is placed at the grid center.
   void setFromPointCloud(const std::vector<std::pair<double, double>>& points,
                          const GridSpec& spec);
 
-  // 中心(ロボット位置)のセル座標を返す。点群入力時に有用。
+  // Return the center (robot position) cell coordinates. Useful for cloud input.
   std::size_t centerRow() const { return center_r_; }
   std::size_t centerCol() const { return center_c_; }
 
@@ -74,18 +78,18 @@ class DistanceCalculator {
   std::size_t rows() const { return rows_; }
   std::size_t cols() const { return cols_; }
 
-  // ---- 出力A: 指定セルの最短距離 [m] ----
+  // ---- Output A: shortest distance [m] at a given cell ----
   double distanceAt(std::size_t r, std::size_t c) const;
 
-  // ---- 出力B: 逃げる向き ∂ρ/∂x(単位ベクトル, x=col方向, y=row方向) ----
+  // ---- Output B: escape direction dphi/dx (unit vector, x=col, y=row) ----
   // 障害物から離れる方向。距離マップの勾配を正規化したもの。
   // 勾配がほぼ0(局所min等)のときは {0,0} を返す。
   Vec2 gradientAt(std::size_t r, std::size_t c) const;
 
-  // ---- 出力C: グリッド全体の距離マップ [m] (row-major) ----
+  // ---- Output C: distance map over the whole grid [m] (row-major) ----
   const std::vector<double>& distanceField() const { return dist_field_; }
 
-  // ---- 出力D: 任意ワールド座標での距離 [m] ----
+  // ---- Output D: distance [m] at an arbitrary world coordinate ----
   // origin はグリッド原点[m](左下セル中心のワールド座標)。
   // グリッド外を指定した場合は最も近い縁の値を返す。
   double distanceAtWorld(double wx, double wy, double origin_x,
