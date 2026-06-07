@@ -42,7 +42,7 @@ struct Vec2 {
 // Occupancy grid (stored as a row-major 1D array)
 //   value == 0 : free / value != 0 : obstacle
 struct OccupancyGrid {
-  std::vector<int> data;   // サイズ = rows * cols
+  std::vector<int> data;   // size = rows * cols
   std::size_t rows = 0;
   std::size_t cols = 0;
 
@@ -53,12 +53,12 @@ struct OccupancyGrid {
 // Builds a square grid of side (2 * half_size_m) centered on the robot.
 struct GridSpec {
   double resolution = 0.05;   // [m/cell]
-  double half_size_m = 2.0;   // ロボット中心から端までの距離 [m]
+  double half_size_m = 2.0;   // distance from robot center to edge [m]
 };
 
 class DistanceCalculator {
  public:
-  // resolution: 1セルの大きさ [m/cell]。距離をメートルで返すために使う。
+  // resolution: size of one cell [m/cell]. Used to return distances in meters.
   explicit DistanceCalculator(double resolution);
 
   // ---- Input 1: build the distance field from an occupancy grid ----
@@ -82,16 +82,16 @@ class DistanceCalculator {
   double distanceAt(std::size_t r, std::size_t c) const;
 
   // ---- Output B: escape direction dphi/dx (unit vector, x=col, y=row) ----
-  // 障害物から離れる方向。距離マップの勾配を正規化したもの。
-  // 勾配がほぼ0(局所min等)のときは {0,0} を返す。
+  // Direction away from obstacles. The normalized gradient of the distance map.
+  // Returns {0, 0} when the gradient is nearly zero (e.g. a local minimum).
   Vec2 gradientAt(std::size_t r, std::size_t c) const;
 
   // ---- Output C: distance map over the whole grid [m] (row-major) ----
   const std::vector<double>& distanceField() const { return dist_field_; }
 
   // ---- Output D: distance [m] at an arbitrary world coordinate ----
-  // origin はグリッド原点[m](左下セル中心のワールド座標)。
-  // グリッド外を指定した場合は最も近い縁の値を返す。
+  // origin is the grid origin [m] (world coordinate of the lower-left cell center).
+  // If the point is outside the grid, the value of the nearest edge is returned.
   double distanceAtWorld(double wx, double wy, double origin_x,
                          double origin_y) const;
 
@@ -103,9 +103,9 @@ class DistanceCalculator {
   std::size_t cols_ = 0;
   std::size_t center_r_ = 0;
   std::size_t center_c_ = 0;
-  std::vector<double> dist_field_;  // 各セルの最短距離 [m]
+  std::vector<double> dist_field_;  // shortest distance [m] for each cell
 };
 
 }  // namespace distance_calc
 
-#endif  // DISTANCE_CALC_DISTANCE_CALC_HPP
+#endif  // DISTANCE_CALC_DISTANCE_CALC_HPPNCE_CALC_HPP
