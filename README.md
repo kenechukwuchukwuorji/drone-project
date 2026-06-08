@@ -3,4 +3,4 @@ This project aims to implement a 2-D local planning algorithm for a drone. Curre
 ## Team members
 - Kenechukwu Jesse Chukwuorji
 - Rinka Izumi
-- Dinesh 
+- Dinesh Elumalai
