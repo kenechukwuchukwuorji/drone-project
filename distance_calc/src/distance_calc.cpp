@@ -9,8 +9,8 @@ namespace distance_calc {
 
 namespace {
 
-// 1次元の二乗距離変換 (Felzenszwalb & Huttenlocher)。
-// f: 入力コスト列, d: 出力(各点の最近接の二乗距離)。
+// 1D squared distance transform (Felzenszwalb & Huttenlocher).
+// f: input cost array, d: output (squared distance to the nearest point at each index).
 void dt1d(const std::vector<double>& f, std::vector<double>& d) {
   const std::size_t n = f.size();
   d.assign(n, 0.0);
@@ -61,7 +61,8 @@ void DistanceCalculator::buildDistanceField(const OccupancyGrid& grid) {
   cols_ = grid.cols;
   const std::size_t total = rows_ * cols_;
 
-  // INFの代わりに「盤面より十分大きい有限値」を使う(dt1dでのinf-inf=NaN回避)。
+  // Use a "large finite value larger than the board" instead of INF
+  // (avoids inf - inf = NaN inside dt1d).
   const double BIG =
       static_cast<double>(rows_) * rows_ + static_cast<double>(cols_) * cols_ + 1.0;
 
@@ -70,7 +71,7 @@ void DistanceCalculator::buildDistanceField(const OccupancyGrid& grid) {
     f[i] = (grid.data[i] != 0) ? 0.0 : BIG;
   }
 
-  // 列方向 → 行方向 の2パス
+  // Two passes: along columns, then along rows.
   std::vector<double> col_in(rows_), col_out(rows_);
   for (std::size_t c = 0; c < cols_; ++c) {
     for (std::size_t r = 0; r < rows_; ++r) col_in[r] = f[r * cols_ + c];
@@ -84,7 +85,7 @@ void DistanceCalculator::buildDistanceField(const OccupancyGrid& grid) {
     for (std::size_t c = 0; c < cols_; ++c) f[r * cols_ + c] = row_out[c];
   }
 
-  // 二乗距離(セル単位) -> 距離[m]
+  // Squared distance (in cells) -> distance [m].
   dist_field_.assign(total, 0.0);
   for (std::size_t i = 0; i < total; ++i) {
     dist_field_[i] = std::sqrt(f[i]) * resolution_;
@@ -100,7 +101,7 @@ void DistanceCalculator::setFromOccupancyGrid(const OccupancyGrid& grid) {
 void DistanceCalculator::setFromPointCloud(
     const std::vector<std::pair<double, double>>& points, const GridSpec& spec) {
   const int half = static_cast<int>(spec.half_size_m / spec.resolution);
-  const int n = 2 * half + 1;  // 奇数 → 中心セルが存在
+  const int n = 2 * half + 1;  // odd -> a center cell exists
   resolution_ = spec.resolution;
 
   OccupancyGrid grid;
@@ -108,8 +109,8 @@ void DistanceCalculator::setFromPointCloud(
   grid.cols = static_cast<std::size_t>(n);
   grid.data.assign(static_cast<std::size_t>(n) * n, 0);
 
-  // ロボットはグリッド中心。点群の (x,y)[m] をセルに落とす。
-  // 規約: x=col方向, y=row方向。
+  // The robot is at the grid center. Drop each point (x,y)[m] into a cell.
+  // Convention: x = col direction, y = row direction.
   for (const auto& p : points) {
     const double px = p.first;   // x
     const double py = p.second;  // y
@@ -139,7 +140,7 @@ Vec2 DistanceCalculator::gradientAt(std::size_t r, std::size_t c) const {
     return dist_field_[rr * cols_ + cc];
   };
 
-  // row方向の勾配(端は片側差分、内部は中央差分)
+  // Gradient along the row direction (one-sided at edges, central inside).
   double gr;
   if (r == 0) {
     gr = val(r + 1, c) - val(r, c);
@@ -148,7 +149,7 @@ Vec2 DistanceCalculator::gradientAt(std::size_t r, std::size_t c) const {
   } else {
     gr = 0.5 * (val(r + 1, c) - val(r - 1, c));
   }
-  // col方向の勾配
+  // Gradient along the column direction.
   double gc;
   if (c == 0) {
     gc = val(r, c + 1) - val(r, c);
@@ -159,8 +160,8 @@ Vec2 DistanceCalculator::gradientAt(std::size_t r, std::size_t c) const {
   }
 
   const double norm = std::hypot(gr, gc);
-  if (norm < 1e-9) return Vec2{0.0, 0.0};  // 局所min等
-  // 単位ベクトル: x=col方向, y=row方向
+  if (norm < 1e-9) return Vec2{0.0, 0.0};  // local minimum, etc.
+  // Unit vector: x = col direction, y = row direction.
   return Vec2{gc / norm, gr / norm};
 }
 
@@ -168,10 +169,11 @@ double DistanceCalculator::distanceAtWorld(double wx, double wy,
                                            double origin_x,
                                            double origin_y) const {
   if (rows_ == 0 || cols_ == 0) return 0.0;
-  // ワールド -> セル。origin は左下セル中心のワールド座標とみなす。
+  // World -> cell. origin is taken as the world coordinate of the
+  // bottom-left cell center.
   int c = static_cast<int>(std::lround((wx - origin_x) / resolution_));
   int r = static_cast<int>(std::lround((wy - origin_y) / resolution_));
-  // グリッド外は縁にクランプ
+  // Clamp out-of-grid queries to the border.
   c = std::clamp(c, 0, static_cast<int>(cols_) - 1);
   r = std::clamp(r, 0, static_cast<int>(rows_) - 1);
   return dist_field_[static_cast<std::size_t>(r) * cols_ + c];
