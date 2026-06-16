@@ -16,9 +16,18 @@ public:
                                                                           std::bind(&APFNode::callback_odom, this, _1));
         obstacle_subscriber_ = create_subscription<geometry_msgs::msg::PoseArray>("/obstacles/poses", 10, 
                                                                           std::bind(&APFNode::callback_obs_sub, this, _1));
-        main_timer_ = create_wall_timer(0.5s, std::bind(&APFNode::main_loop, this));
+        main_timer_ = create_wall_timer(0.1s, std::bind(&APFNode::main_loop, this));
         control_timer_ = create_wall_timer(0.1s, std::bind(&APFNode::control_loop, this));
         velocity_publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>("/cmd_vel", 10);
+
+        this->declare_parameter("threat_dist", 0.5);
+        this->declare_parameter("K_att", 10.0);
+        this->declare_parameter("K_rep", 2.0);
+        this->declare_parameter("wp_dist", 0.4);
+        threat_dist_ = this->get_parameter("threat_dist").as_double();
+        K_att_ = this->get_parameter("threat_dist").as_double();
+        K_rep_= this->get_parameter("threat_dist").as_double();
+        wp_dist_= this->get_parameter("wp_dist").as_double();
     }
 
 private:
@@ -32,20 +41,21 @@ private:
     geometry_msgs::msg::PoseArray obstacles_;
 
     Eigen::Vector2d curr_pos_;
-    Eigen::Vector2d target_pos_ = Eigen::Vector2d(4.0, 2.0);
+    Eigen::Vector2d target_pos_ = Eigen::Vector2d(4.0, 1.0);
     Eigen::Vector2d curr_wp_ = target_pos_;
 
     bool has_odom_ = false;
     bool has_obstacles_ = false;
+    bool is_at_goal_ = false;
 
     double curr_yaw_;
-    double K_att_ = 2.0;
-    double K_rep_ = 2.0;
-    double threat_dist_ = 0.5; // in meters
-    double wp_dist_ = 0.5; // distance to travel in the newly calculated path. 
+    double K_att_;
+    double K_rep_;
+    double threat_dist_; // in meters
+    double wp_dist_; // distance to travel in the newly calculated path. 
                            //TODO: Consider making this distance proportional to the magnitude of the resultant force
     double apf_vel_;
-    double max_vel_ = 0.22; // Maximum velocity of the drone
+    double max_vel_ = 0.4; // Maximum velocity of the drone
 
     //P-Controller
     double Kp_lin_ = 1.0;
@@ -74,6 +84,14 @@ private:
         if(!has_odom_ || !has_obstacles_){
             return;
         }
+
+        // check if robot has reached goal, if yes, break
+        double dist_err = distance(curr_pos_, target_pos_);
+        if (dist_err < 0.2) {
+            is_at_goal_ = true;
+            return;
+        }
+
 
         Eigen::Vector2d F_att = force_attractive();
         Eigen::Vector2d F_rep;
@@ -131,7 +149,7 @@ private:
         
         geometry_msgs::msg::TwistStamped vel_msg;
 
-        if (dist_err < 0.3) {
+        if (dist_err < 0.2 || is_at_goal_) {
             vel_msg.twist.linear.x = 0.0;
             vel_msg.twist.angular.z = 0.0;
             RCLCPP_INFO(this->get_logger(), "Goal Reached!");
