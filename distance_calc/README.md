@@ -1,8 +1,7 @@
 # Obstacle Distance Calculation Module (distance_calc)
 
 A standalone, APF-independent C++ module that computes the **shortest distance**
-to obstacles. **No external library dependencies** (standard C++17 only). It can
-be used from any APF implementation.
+to obstacles. 
 
 > Scope: This module covers "environment → shortest distance" only.
 > Repulsive/attractive forces and the APF itself are not included (handled separately).
