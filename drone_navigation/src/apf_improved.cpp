@@ -73,6 +73,11 @@ private:
     double Kp_lin_ = 1.0;
     double Kp_ang_ = 1.0;
 
+    // Local minima parameters
+    double eps_g_ = 0.001;
+    double eps_d_ = 0.5;
+    double eps_ = 0.1; 
+
 
     void callback_pose(tf2_msgs::msg::TFMessage::SharedPtr msg){
         pose_msg_ = *msg;
@@ -161,6 +166,14 @@ private:
         double F_all_mag = F_all.norm();
         double F_all_angle = std::atan2(F_all.y(), F_all.x());
         
+        // Improvement of local minima: check if magnitude of resultant is less than epsilon
+        if (F_all_mag < eps_g_){
+            Eigen::Vector2d o_P_new = curr_pos_ + (curr_pos_/curr_pos_.norm()) * eps_;
+            curr_wp_ = o_P_new;
+            apf_vel_ = F_all_mag;
+            return;
+        }
+
         //Transform to robot frame
         double alpha = F_all_angle - curr_yaw_;
         double m_x_new = wp_dist_*cos(alpha);
@@ -184,6 +197,19 @@ private:
 
     }
 
+    double sigmoidWeight(){
+        double goal_dist =
+            distance(curr_pos_, target_pos_);
+
+        double phi =
+            -std::exp(goal_dist)
+            /
+            (1.0 + std::exp(goal_dist))
+            + 0.5;
+
+        return std::abs(phi);
+    }
+
     Eigen::Vector2d force_attractive(){
         double d_dx = -(target_pos_.x() - curr_pos_.x())/distance(curr_pos_, target_pos_);
         double d_dy = -(target_pos_.y() - curr_pos_.y())/distance(curr_pos_, target_pos_);
@@ -194,13 +220,16 @@ private:
     }
 
     Eigen::Vector2d force_repulsive(Eigen::Vector2d obs_pos){
+        // introduce the pi factor
+        double phi =sigmoidWeight();
+
         double obs_dist = distance(curr_pos_, obs_pos);
         double d_dx = -(obs_pos.x() - curr_pos_.x())/obs_dist;
         double d_dy = -(obs_pos.y() - curr_pos_.y())/obs_dist;
         Eigen::Vector2d d_dX(d_dx, d_dy);
         Eigen::Vector2d F_rep;
         if(obs_dist <= threat_dist_){
-            F_rep = 2*K_rep_*((1/obs_dist) - (1/threat_dist_))*(1/(obs_dist*obs_dist))*d_dX;
+            F_rep = 2*phi*K_rep_*((1/obs_dist) - (1/threat_dist_))*(1/(obs_dist*obs_dist))*d_dX;
         }else{
             F_rep << 0, 0;
         }

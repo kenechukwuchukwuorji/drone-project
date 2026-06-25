@@ -3,6 +3,7 @@
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "geometry_msgs/msg/point.hpp"
+#include <std_msgs/msg/bool.hpp>
 #include "tf2_msgs/msg/tf_message.hpp"
 #include <cmath>
 
@@ -18,6 +19,8 @@ public:
                                                                           std::bind(&APFNode::callback_pose, this, _1));
         obstacle_subscriber_ = create_subscription<geometry_msgs::msg::PoseArray>("/obstacles/poses", 10, 
                                                                           std::bind(&APFNode::callback_obs_sub, this, _1));
+        is_wall_subscriber_ = create_subscription<std_msgs::msg::Bool>("/wall_follow_active", 10, 
+                                                                          std::bind(&APFNode::is_wall_callback, this, _1));
         main_timer_ = create_wall_timer(0.1s, std::bind(&APFNode::main_loop, this));
         initialisation_timer_ = create_wall_timer(0.1s, std::bind(&APFNode::initialisation, this));
         wp_publisher_ = create_publisher<geometry_msgs::msg::Point>("/px4_0/waypoint", 10);
@@ -43,6 +46,7 @@ private:
 
     rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr pose_subscriber_;
     rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr obstacle_subscriber_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr is_wall_subscriber_;
     rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr wp_publisher_;
     rclcpp::TimerBase::SharedPtr main_timer_;
     rclcpp::TimerBase::SharedPtr initialisation_timer_;
@@ -58,6 +62,7 @@ private:
     bool has_obstacles_ = false;
     bool is_initialised_ = false;
     bool is_at_goal_ = false;
+    bool is_wall_ = false;
 
     double curr_yaw_;
     double curr_z_;
@@ -115,9 +120,19 @@ private:
         }
     }
 
+    void is_wall_callback(std_msgs::msg::Bool::SharedPtr msg){
+        is_wall_ = msg->data;
+
+    }
+
     void main_loop(){
         if(!has_pose_ || !has_obstacles_ || !is_initialised_){
             RCLCPP_INFO(this->get_logger(), "Insufficient data. Aborting!!!");
+            return;
+        }
+
+        if (is_wall_){
+            RCLCPP_INFO(this->get_logger(), "Wall detected, switching to wall following");
             return;
         }
 
@@ -143,7 +158,8 @@ private:
             F_rep = Eigen::Vector2d(0, 0);
             for(const auto& obstacle : obstacles_.poses){
                 Eigen::Vector2d m_P_obs(obstacle.position.x, obstacle.position.y);
-                Eigen::Vector2d o_P_obs = curr_pos_ + o_R_m*m_P_obs;  // the rotation matrix is not used because the costmap doesn't rotate with the drone
+                // Eigen::Vector2d o_P_obs = curr_pos_ + o_R_m*m_P_obs;
+                Eigen::Vector2d o_P_obs = curr_pos_ + m_P_obs;  // the rotation matrix is not used because the costmap doesn't rotate with the drone
                 F_rep += force_repulsive(o_P_obs);
             }
             
